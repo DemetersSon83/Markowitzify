@@ -28,7 +28,10 @@ from sklearn.metrics import silhouette_samples
 import pandas as pd
 from functools import reduce
 import statsmodels.api as sml
-from pandas_datareader import data as wb
+try:
+    from pandas_datareader import data as wb
+except ImportError:
+    wb = None
 from scipy.stats import norm
 from scipy.optimize import minimize, Bounds
 import zipfile, urllib.request, shutil
@@ -288,6 +291,8 @@ def merge_stocks(df_list):
 
 # Pandas Data Reader
 def import_stock_data_DataReader(start = '2010-1-1', **options):
+    if wb is None:
+        raise ImportError('pandas_datareader is required for DataReader provider')
     tickers = options.pop('tickers', [])
     TSP = options.pop('TSP', False)
     data = DataFrame()
@@ -316,7 +321,7 @@ def import_stock_data(start='2010-1-1', tickers=None, provider='auto'):
             import yfinance as yf  # noqa: F401
             provider = 'yfinance'
         except ImportError:
-            provider = 'datareader'
+            provider = 'datareader' if wb is not None else None
 
     if provider == 'yfinance':
         import yfinance as yf
@@ -330,7 +335,7 @@ def import_stock_data(start='2010-1-1', tickers=None, provider='auto'):
     if provider == 'datareader':
         return import_stock_data_DataReader(start=start, tickers=tickers)
 
-    raise ValueError("provider must be one of: 'auto', 'yfinance', 'datareader'")
+    raise ValueError("provider must be one of: 'auto', 'yfinance', 'datareader' and available in environment")
 
 
 def import_high_low(start = '2010-1-1', **options):
@@ -343,15 +348,17 @@ def import_high_low(start = '2010-1-1', **options):
                 import yfinance as yf  # noqa: F401
                 provider = 'yfinance'
             except ImportError:
-                provider = 'datareader'
+                provider = 'datareader' if wb is not None else None
         if provider == 'yfinance':
             import yfinance as yf
 
             price_data = yf.download(ticker, start=start, progress=False)
         elif provider == 'datareader':
+            if wb is None:
+                raise ImportError('pandas_datareader is required for datareader provider')
             price_data = wb.DataReader(ticker, data_source='yahoo', start=start)
         else:
-            raise ValueError("provider must be one of: 'auto', 'yfinance', 'datareader'")
+            raise ValueError("provider must be one of: 'auto', 'yfinance', 'datareader' and available in environment")
         data['Open'] = price_data['Open']
         data['high'] = price_data['High']
         data['low'] = price_data['Low']

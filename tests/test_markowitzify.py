@@ -80,3 +80,12 @@ def test_monte_carlo_helpers(price_df):
     roi = hm.ROI(sim)
     assert isinstance(roi, float)
     assert np.isfinite(roi)
+
+
+def test_datareader_provider_errors_when_unavailable(monkeypatch):
+    monkeypatch.setattr(hm, 'wb', None)
+    with np.testing.assert_raises(ImportError):
+        hm.import_stock_data_DataReader(start='2020-01-01', tickers=['AAA'])
+
+    with np.testing.assert_raises(ImportError):
+        hm.import_high_low(start='2020-01-01', ticker='AAA', provider='datareader')
