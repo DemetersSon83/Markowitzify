@@ -548,7 +548,9 @@ def optPort_nco(cov, mu=None, maxNumClusters=10):
         mu = Series(mu_arr[:,0])
     corr1 = cov2corr(cov)
     corr1, clstrs, _ = clusterKMeansBase(corr1, maxNumClusters, n_init=10)
-    wIntra = DataFrame(0, index=cov.index, columns=clstrs.keys())
+    # Use float dtype to avoid pandas integer block assignment errors
+    # when writing fractional optimized weights.
+    wIntra = DataFrame(0.0, index=cov.index, columns=clstrs.keys())
     for i in clstrs:
         cov_ = cov.loc[clstrs[i], clstrs[i]].values
         if mu is None:
