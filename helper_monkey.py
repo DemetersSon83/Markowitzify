@@ -309,14 +309,53 @@ def import_stock_data_DataReader(start = '2010-1-1', **options):
     return data
 
 
+def import_stock_data(start='2010-1-1', tickers=None, provider='auto'):
+    tickers = tickers or []
+    if provider == 'auto':
+        try:
+            import yfinance as yf  # noqa: F401
+            provider = 'yfinance'
+        except ImportError:
+            provider = 'datareader'
+
+    if provider == 'yfinance':
+        import yfinance as yf
+
+        if len(tickers) == 1:
+            data = yf.download(tickers[0], start=start, progress=False)
+            return DataFrame({tickers[0]: data['Adj Close']})
+        data = yf.download(tickers=tickers, start=start, progress=False)
+        return data['Adj Close']
+
+    if provider == 'datareader':
+        return import_stock_data_DataReader(start=start, tickers=tickers)
+
+    raise ValueError("provider must be one of: 'auto', 'yfinance', 'datareader'")
+
+
 def import_high_low(start = '2010-1-1', **options):
     ticker = options.pop('ticker', None)
+    provider = options.pop('provider', 'auto')
     data = DataFrame()
     if ticker is not None:
-        data['Open'] = wb.DataReader(ticker, data_source='yahoo', start=start)['Open']
-        data['high'] = wb.DataReader(ticker, data_source='yahoo', start=start)['High']
-        data['low'] = wb.DataReader(ticker, data_source='yahoo', start=start)['Low']
-        data['Adj Close'] = wb.DataReader(ticker, data_source='yahoo', start=start)['Adj Close']
+        if provider == 'auto':
+            try:
+                import yfinance as yf  # noqa: F401
+                provider = 'yfinance'
+            except ImportError:
+                provider = 'datareader'
+        if provider == 'yfinance':
+            import yfinance as yf
+
+            price_data = yf.download(ticker, start=start, progress=False)
+        elif provider == 'datareader':
+            price_data = wb.DataReader(ticker, data_source='yahoo', start=start)
+        else:
+            raise ValueError("provider must be one of: 'auto', 'yfinance', 'datareader'")
+        data['Open'] = price_data['Open']
+        data['high'] = price_data['High']
+        data['low'] = price_data['Low']
+        data['Adj Close'] = price_data['Adj Close']
         data = DataFrame(data)
     else:
         print('Ticker must be specified.')
@@ -348,21 +387,21 @@ def hurst(price_list, lag1=2, lag2=20):
     return H
 
 def ret_risk(w, exp_return, cov):
-    return -((w.T@exp_return) / (w.T@cov@w)**0.5)
+    port_return = w @ exp_return
+    port_vol = np.sqrt(w @ cov @ w)
+    return -(port_return / port_vol)
 
 # Markowitz Optimization
 def markowitz(df):
     data = log_returns(df)
     data = data.dropna()
-    w = np.ones((data.values.T.shape[0],1))*(1.0/data.values.T.shape[0])
-    m = np.mean(data.values.T, axis=1)
-    demeaned = data.values.T - m[:,None]
-    m = m.reshape(m.shape[0],1)
-    exp_return = m*w
-    cov = np.cov(demeaned)
+    n = data.shape[1]
+    w = np.full(n, 1.0 / n)
+    exp_return = np.mean(data.values, axis=0)
+    cov = np.cov(data.values, rowvar=False)
     opt_bounds = Bounds(0, 1)
     opt_constraints = ({'type': 'eq', 'fun': lambda w: 1.0 - np.sum(w)})
-    res = minimize(ret_risk, w, args = (exp_return, cov), method = 'SLSQP', bounds = opt_bounds, constraints = opt_constraints)
+    res = minimize(ret_risk, w, args=(exp_return, cov), method='SLSQP', bounds=opt_bounds, constraints=opt_constraints)
     return res.x
     
 # Sharpe Ratio
@@ -458,15 +497,25 @@ def denoisedCorr(eVal, eVec, nFacts):
 def clusterKMeansBase(corr0, maxNumClusters=10, n_init=10):
     corr0 = DataFrame(corr0)
     x, silh = ((1-corr0.fillna(0))/2.)**.5, Series()
+    x_values = x.to_numpy()
+    max_k = min(maxNumClusters, x_values.shape[0] - 1)
+    if max_k < 2:
+        raise ValueError('Need at least 3 assets to form clusters.')
+
+    kmeans = None
     for init in range(n_init):
-        for i in range(2, maxNumClusters+1):
-            kmeans_ = KMeans(n_clusters=i, n_jobs=1, n_init=1)
-            kmeans_ = kmeans_.fit(x)
-            kmeans_labels = kmeans_.fit_predict(x)
-            silh_ = silhouette_samples(x, kmeans_labels)
+        for i in range(2, max_k + 1):
+            kmeans_ = KMeans(n_clusters=i, n_init=10, random_state=init)
+            kmeans_labels = kmeans_.fit_predict(x_values)
+            silh_ = silhouette_samples(x_values, kmeans_labels)
             stat = (silh_.mean()/silh_.std(), silh.mean()/silh.std())
             if np.isnan(stat[1]) or stat[0]>stat[1]:
                 silh, kmeans = silh_, kmeans_
+
+    if kmeans is None:
+        kmeans = KMeans(n_clusters=2, n_init=10, random_state=0).fit(x_values)
+        silh = silhouette_samples(x_values, kmeans.labels_)
+
     newIdx = np.argsort(kmeans.labels_)
     corr1 = corr0.iloc[newIdx]
     corr1 = corr1.iloc[:, newIdx]
@@ -478,6 +527,9 @@ def clusterKMeansBase(corr0, maxNumClusters=10, n_init=10):
 def optPort_nco(cov, mu=None, maxNumClusters=10):
     # Portfolio optimizataion function using NCO method
     cov = DataFrame(cov)
+    if cov.shape[0] < 3:
+        base = optPort(cov.values, mu)
+        return np.asarray(base).reshape(-1, 1)
     if mu is not None:
         mu = Series(mu[:,0])
     corr1 = cov2corr(cov)
@@ -519,7 +571,7 @@ def drift_calc(data):
 def daily_returns(data, days, iterations):
     ft = drift_calc(data)
     try:
-        stv = log_returns(data).std().values()
+        stv = log_returns(data).std().values
     except:
         stv = log_returns(data).std()
     dr = np.exp(ft + stv*norm.ppf(np.random.rand(days, iterations)))
@@ -552,7 +604,9 @@ def simulate(data, days, iterations):
 
 def ROI(price_list):
     price_list_df = DataFrame(price_list)
-    out = round((price_list_df.iloc[-1].mean()-price_list[0,1])/price_list_df.iloc[-1].mean(),4)
+    start = price_list_df.iloc[0].mean()
+    end = price_list_df.iloc[-1].mean()
+    out = round((end-start)/start,4)
     return out
 
 def expected_value(price_list):
@@ -573,27 +627,15 @@ def sma(x, n=10):
     return (cumsum[n:] - cumsum[:-n]) / float(n)
 """
 def sma(s, n=10):
-    out = np.zeros(len(s))
-    for i in range(1,len(s)-n):
-        out[i+n] = np.mean(s[i:i+n])
-    return out
+    return pd.Series(s).rolling(window=n).mean().fillna(0).to_numpy()
 
 # Exponential Moving Average
 def ema(s, n=10):
-     ema = np.zeros(len(s))
-     multiplier = 2.0 / float(1 + n)
-     sma = sum(s[:n]) / float(n)
-     ema[n-1] = sma
-     for i in range(1,len(s)-n):
-         ema[i+n] = s[i+n]*multiplier + ema[i-1+n]*(1-multiplier)
-     return ema
+     return pd.Series(s).ewm(span=n, adjust=False, min_periods=n).mean().fillna(0).to_numpy()
      
 # Rolling volatility
 def rolling_volatility(s, n=10):
-    volatility = np.zeros(len(s))
-    for i in range(1,len(s)-n):
-        volatility[i+n] = np.std(s[i:i+n])
-    return volatility
+    return pd.Series(s).rolling(window=n).std().fillna(0).to_numpy()
 
 # Fractal Indicator
 # df is from import_high_low() function.
@@ -762,26 +804,19 @@ def RSI(data1, initial_lookback=14, lookback=14):
 def signal(data, lookback=14):
     rsi_out = RSI(data, initial_lookback=lookback, lookback=lookback)
     fractal = fractal_indicator(data, n=20, min_max_lookback=lookback)
-    rsi = rsi_out['RSI']
-    frac = fractal['Fractal_Indicator']
-    data = data.merge(rsi, right_index=True, left_index=True)
-    data = data.merge(frac, right_index=True, left_index=True)
-    data = data[data['Fractal_Indicator'] != 0]
-    data = data[data['RSI'] != 0]
-    rsi_ = [-1.0 if data['RSI'][i] <= 30 else (1.0 if data['RSI'][i] >= 70 else 0.0) for i in range(len(data))]
-    rsi_ = np.array(rsi_)
-    rsi_ = pd.DataFrame(rsi_, columns=['RSI_Signal'])
-    rsi_ = rsi_.set_index(data.index)
-    #data = data.assign(RSI_signal = lambda x: (-1 if x['RSI'].values <= 30 else (1 if x['RSI'].values >= 70 else 0)))
-    trend = [data['Adj Close'][i] - data['Adj Close'][i-lookback] if (i-lookback) > 0 else 0 for i in range(len(data))]
-    fr = [1.0 if data['Fractal_Indicator'][i] >= 1 else 0 for i in range(len(data))]
-    trend1 = [-1.0 if trend[i] < 0 else (1.0 if trend[i] > 0 else 0) for i in range(len(trend))]
-    fr_trend1 = [fr[i]*trend1[i] for i in range(len(fr))]
-    fr_trend1 = np.array(fr_trend1)
-    fr_trend1 = pd.DataFrame(fr_trend1, columns=['Fractal_Signal'])
-    fr_trend1 = fr_trend1.set_index(data.index)
-    sig_out = data.merge(fr_trend1, right_index=True, left_index=True)
-    sig_out = sig_out.merge(rsi_, right_index=True, left_index=True)
+    data = data.merge(rsi_out[['RSI']], right_index=True, left_index=True)
+    data = data.merge(fractal[['Fractal_Indicator']], right_index=True, left_index=True)
+    data = data[(data['Fractal_Indicator'] != 0) & (data['RSI'] != 0)]
+
+    rsi_signal = np.select([data['RSI'] <= 30, data['RSI'] >= 70], [-1.0, 1.0], default=0.0)
+    trend_delta = data['Adj Close'].diff(lookback).fillna(0)
+    trend_signal = np.sign(trend_delta)
+    fractal_active = (data['Fractal_Indicator'] >= 1).astype(float)
+    fractal_signal = fractal_active * trend_signal
+
+    sig_out = data.copy()
+    sig_out['Fractal_Signal'] = fractal_signal
+    sig_out['RSI_Signal'] = rsi_signal
     return sig_out
     
     
