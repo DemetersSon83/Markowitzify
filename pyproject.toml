@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "markowitzify"
+version = "0.1.0"
+description = "Portfolio and market indicator helpers inspired by Markowitz optimization"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Mark M. Bailey" }]
+dependencies = [
+  "numpy",
+  "pandas",
+  "requests",
+  "scipy",
+  "statsmodels",
+  "scikit-learn",
+  "pandas_datareader",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "build",
+]
+data = [
+  "yfinance",
+]
+
+[tool.setuptools]
+py-modules = ["markowitzify", "helper_monkey", "TSP_Reader"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E402", "E501", "I001", "E401", "E722"]
