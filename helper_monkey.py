@@ -498,14 +498,24 @@ def clusterKMeansBase(corr0, maxNumClusters=10, n_init=10):
     corr0 = DataFrame(corr0)
     x, silh = ((1-corr0.fillna(0))/2.)**.5, Series()
     x_values = x.to_numpy()
+    max_k = min(maxNumClusters, x_values.shape[0] - 1)
+    if max_k < 2:
+        raise ValueError('Need at least 3 assets to form clusters.')
+
+    kmeans = None
     for init in range(n_init):
-        for i in range(2, maxNumClusters+1):
+        for i in range(2, max_k + 1):
             kmeans_ = KMeans(n_clusters=i, n_init=10, random_state=init)
             kmeans_labels = kmeans_.fit_predict(x_values)
             silh_ = silhouette_samples(x_values, kmeans_labels)
             stat = (silh_.mean()/silh_.std(), silh.mean()/silh.std())
             if np.isnan(stat[1]) or stat[0]>stat[1]:
                 silh, kmeans = silh_, kmeans_
+
+    if kmeans is None:
+        kmeans = KMeans(n_clusters=2, n_init=10, random_state=0).fit(x_values)
+        silh = silhouette_samples(x_values, kmeans.labels_)
+
     newIdx = np.argsort(kmeans.labels_)
     corr1 = corr0.iloc[newIdx]
     corr1 = corr1.iloc[:, newIdx]
