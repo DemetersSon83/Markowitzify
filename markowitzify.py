@@ -103,7 +103,8 @@ class portfolio():
                 print('It''s dangerous to go alone! Take this.')
                 print('Building portfolio...')
             
-            self.portfolio = mojo.import_stock_data_DataReader(start = date_from, tickers=TKR_list)
+            provider = options.pop('provider', 'auto')
+            self.portfolio = mojo.import_stock_data(start=date_from, tickers=TKR_list, provider=provider)
             
             if self.verbose:
                 print('Portfolio complete.')
@@ -175,6 +176,10 @@ class portfolio():
             print('Master using it and you can have this... Portfolio optimized.')
             print(self.nco.head())
 
+    def optimize_nco(self, **options):
+
+        self.NCO(**options)
+
     def markowitz(self):
         
         if self.verbose:
@@ -198,7 +203,11 @@ class portfolio():
         dates_kw = options.pop('dates_kw', 'date')
         filename = options.pop('filename', 'portfolio.csv')
         df = mojo.pd.read_csv(os.path.join(input_path, filename), index_col = 0)
-        df.index_name = dates_kw
+        df.index.name = dates_kw
+        try:
+            df.index = mojo.pd.to_datetime(df.index)
+        except Exception:
+            pass
         
         self.portfolio = df
         
@@ -214,11 +223,11 @@ class portfolio():
     def sharpe_ratio(self, **options):
         
         if self.optimal is None:
-            opt = self.markowitz()
-        else:
-            opt = self.optimal
+            self.markowitz()
+        opt = self.optimal
         
-        w = options.pop('weights', opt)
+        default_weights = opt.iloc[0].to_numpy(dtype=float)
+        w = options.pop('weights', default_weights)
         risk_free = options.pop('risk_free', 0.035)
         
         if self.verbose:
@@ -371,7 +380,8 @@ class stonks():
         start = options.pop('start', date_from)
         
         self.TKR = TKR
-        self.stonk = mojo.import_high_low(start = start, ticker=TKR)
+        provider = options.pop('provider', 'auto')
+        self.stonk = mojo.import_high_low(start=start, ticker=TKR, provider=provider)
         self.verbose = options.pop('verbose', False)
         self.bands = None
         self.fract = None
