@@ -527,11 +527,18 @@ def clusterKMeansBase(corr0, maxNumClusters=10, n_init=10):
 def optPort_nco(cov, mu=None, maxNumClusters=10):
     # Portfolio optimizataion function using NCO method
     cov = DataFrame(cov)
-    if cov.shape[0] < 3:
-        base = optPort(cov.values, mu)
-        return np.asarray(base).reshape(-1, 1)
+    mu_arr = None
     if mu is not None:
-        mu = Series(mu[:,0])
+        mu_arr = np.asarray(mu)
+        if mu_arr.ndim == 1:
+            mu_arr = mu_arr.reshape(-1, 1)
+        elif mu_arr.ndim == 2 and mu_arr.shape[1] != 1:
+            mu_arr = mu_arr.reshape(-1, 1)
+    if cov.shape[0] < 3:
+        base = optPort(cov.values, mu_arr)
+        return np.asarray(base).reshape(-1, 1)
+    if mu_arr is not None:
+        mu = Series(mu_arr[:,0])
     corr1 = cov2corr(cov)
     corr1, clstrs, _ = clusterKMeansBase(corr1, maxNumClusters, n_init=10)
     wIntra = DataFrame(0, index=cov.index, columns=clstrs.keys())

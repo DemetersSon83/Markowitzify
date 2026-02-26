@@ -42,6 +42,11 @@ def test_nco_cluster_upper_bound_and_small_universe():
     assert w2.shape == (2, 1)
     assert np.isclose(w2.sum(), 1.0, atol=1e-6)
 
+    mu2 = np.array([0.01, 0.02])
+    w2_mu = hm.optPort_nco(cov2, mu=mu2, maxNumClusters=10)
+    assert w2_mu.shape == (2, 1)
+    assert np.isclose(w2_mu.sum(), 1.0, atol=1e-6)
+
 
 def test_portfolio_smoke(price_df):
     p = markowitzify.portfolio()
